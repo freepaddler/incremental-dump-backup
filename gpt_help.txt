@@ -1,0 +1,73 @@
+# list disks
+camcontrol devlist
+
+# show partitioning
+gpart show -pl
+
+# delete each partition
+gpart delete -i 1 /dev/ada2
+
+# destroy partition scheme (-F to force, avoid step above)
+gpart destroy /dev/ada2
+
+# create partition scheme 
+gpart create -s gpt /dev/ada2
+
+## USE LABELS when adding patition and in fstab
+
+# if disk is bootable
+gpart add -a 4k -t freebsd-boot -s 512k -l boot ada2
+
+# swap partition
+gpart add -a 4k -t freebsd-swap -s 512M -l swap ada
+
+# UFS partition
+gpart add -a 4k -t freebsd-ufs -l root ada2
+
+# restore partition from backup (F - force, l - restore labels)
+gpart restore -lF /dev/ada2 < /backup/../ada2.gpart
+
+# install boot code on bootable disk
+gpart bootcode -b /boot/pmbr -p /boot/gptboot -i 1 ada2
+
+# format USF partition (add -t flag to enable trim)
+newfs -U /dev/gpt/root
+
+# turn on swap
+# swapon /dev/gpt/swap
+
+# fstab
+# Device	    Mountpoint	FStype	Options	Dump	Pass#
+/dev/gpt/swap   none        swap    sw      0       0
+/dev/gpt/root   /		    ufs	    rw	    1	    1
+
+## Growing FS after adding disk space
+gpart show ada2
+
+# if [CORRUPT] then recover
+gpart recover ada2
+
+# to allow grow live filesystem (NOT RECOMMENDED!)
+# sysctl kern.geom.debugflags=16
+
+# if swap at the end -> move it
+swapoff /dev/gpt/swap
+gpart delete -i 3 ada2
+
+# resize partition
+gpart resize -a 4k -i 2 -s 80G ada2
+
+# grow filesystem
+growfs /dev/gpt/root
+
+# return swap back
+gpart add -a 4k -t freebsd-swap -s 512M -l swap ada
+swapon /dev/gpt/swap
+
+## Move (clone)q data disk->disk (better to set ada1 as read-only)
+dd if=/dev/ada1 of=/dev/ada2 bs=1024b
+# dump option (add L if cloning live filesystem)
+dump -C32 -b64 -0an -f - / | (cd /mnt && restore -ruf -)
+
+
+
